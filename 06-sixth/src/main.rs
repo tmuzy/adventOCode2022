@@ -2,15 +2,16 @@ use std::{fs, collections::HashSet};
 
 
 fn main() {
+    let window_size:usize = 14; //4 for part one, 14 for part two
     let file_content = get_content("input");
     let char_set = file_content.chars()
     .collect::<Vec<char>>()
-    .windows(4)
+    .windows(window_size)
     .map(|c| c.iter().collect::<String>())
     .enumerate()
     .filter_map(|(i, value)| all_unique_chars(i,value))
     .collect::<Vec<(usize, String)>>();
-    println!("{}", char_set.first().unwrap().0 + 4)
+    println!("{}", char_set.first().unwrap().0 + window_size)
 }
 
 fn all_unique_chars(index: usize, value: String) -> Option<(usize, String)> {
