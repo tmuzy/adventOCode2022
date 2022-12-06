@@ -16,6 +16,8 @@ trait CrateOperations {
     fn count_crates(&mut self, x: usize) -> usize;
 
     fn move_crate(&mut self, from_stack_index: usize, to_stack_index: usize);
+    fn move_crates(&mut self, amount: usize, from_stack_index: usize, to_stack_index: usize);
+
 }
 
 impl CrateOperations for ElfCrates {
@@ -24,8 +26,14 @@ impl CrateOperations for ElfCrates {
     }
 
     fn move_crate(&mut self, from_stack_index: usize, to_stack_index: usize) {
-        let popped = self.get_mut(from_stack_index).unwrap().pop().unwrap();
-        self.get_mut(to_stack_index).unwrap().push(popped);
+        let popped = self[from_stack_index].pop().unwrap();
+        self[to_stack_index].push(popped);
+    }
+
+    fn move_crates(&mut self, amount: usize, from_stack_index: usize, to_stack_index: usize) {
+        let from_stack = &mut self[from_stack_index];
+        let drained:Vec<ElfCrate> = from_stack.drain(from_stack.len()-amount..).collect();
+        self[to_stack_index].extend(drained);
     }
 }
 fn main() {
@@ -38,15 +46,19 @@ fn main() {
     let mut elf_crates: ElfCrates = parse_crates(crates);
 
     let moves = parse_moves(moves);
+    // part 1 -- too lazy to do both at the same time
+    // for crate_move in moves {
+    //     for _ in 0..crate_move.0 {
+    //         elf_crates.move_crate(crate_move.1 - 1, crate_move.2 - 1)
+    //     }
+    // }
+
     for crate_move in moves {
-        for _ in 0..crate_move.0 {
-            elf_crates.move_crate(crate_move.1 - 1, crate_move.2 - 1)
-        }
+        elf_crates.move_crates(crate_move.0, crate_move.1 - 1, crate_move.2 - 1)
     }
 
-    for elf_crate in elf_crates {
-        println!("{}", elf_crate.last().unwrap().label)
-    }
+
+    println!("{}", elf_crates.map(|ec| ec.last().unwrap().label.to_string()).join(""))
 }
 
 /** in `[1; 9]` */
