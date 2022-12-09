@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    cell::Cell,
     fs::File,
     io::{BufRead, BufReader},
     sync::Arc,
@@ -8,8 +8,9 @@ use std::{
 #[derive(Debug)]
 struct ElfFile {
     name: String,
-    size: i32,
+    size: i64,
     parent: Option<Arc<ElfFile>>,
+    total_size: Cell<u64>,
 }
 
 impl ElfFile {
@@ -20,6 +21,24 @@ impl ElfFile {
     fn is_root(&self) -> bool {
         self.name == "/"
     }
+
+    fn get_content(&self, tree: &Vec<Arc<ElfFile>>) -> Option<Vec<Arc<ElfFile>>> {
+        if !self.is_dir() {
+            return None;
+        }
+        let mut files: Vec<Arc<ElfFile>> = Vec::new();
+        for file in tree {
+            if !file.is_root() {
+                if self.name == file.parent.clone().unwrap().name {
+                    files.push(file.clone())
+                }
+            }
+        }
+        if files.len() > 0 {
+            return Some(files);
+        }
+        None
+    }
 }
 
 fn main() {
@@ -29,6 +48,7 @@ fn main() {
         name: "/".to_string(),
         size: -1,
         parent: None,
+        total_size: Cell::new(0),
     });
     let mut file_tree: Vec<Arc<ElfFile>> = vec![tree_root.clone()];
 
@@ -39,7 +59,18 @@ fn main() {
             HistoryItemType::CD => {
                 if let Some(result) = execute_cd(item, current_directory.clone()) {
                     current_directory = Arc::new(result);
-                    file_tree.push(current_directory.clone());
+                    let already_exists = file_tree.iter().find(|f| {
+                        f.is_dir()
+                            && !f.is_root()
+                            && f.name == current_directory.clone().name
+                            && f.parent.clone().unwrap().name
+                                == current_directory.parent.clone().unwrap().name
+                    });
+                    if !already_exists.is_some() {
+                        file_tree.push(current_directory.clone());
+                    } else {
+                        println!("already exists {}", current_directory.name)
+                    }
                 } else {
                     current_directory = current_directory.parent.clone().unwrap()
                 }
@@ -49,55 +80,59 @@ fn main() {
                     let mut split_item = item.split_whitespace();
 
                     let new_file = ElfFile {
-                        size: split_item.next().unwrap().parse::<i32>().unwrap(),
+                        size: split_item.next().unwrap().parse::<i64>().unwrap(),
                         name: split_item.next().unwrap().to_string(),
                         parent: Some(current_directory.clone()),
+                        total_size: Cell::new(0),
                     };
-                    file_tree.push(Arc::new(new_file))
+
+                    let file_arc = Arc::new(new_file);
+                    file_tree.push(file_arc.clone());
+                    let mut parent = file_arc.parent.clone().unwrap();
+                    while !parent.is_root() {
+                        parent
+                            .total_size
+                            .set(parent.total_size.get() + file_arc.clone().size as u64);
+                        parent = parent.clone().parent.clone().unwrap()
+                    }
                 }
             }
             HistoryItemType::LS => (),
         }
     }
 
-    let mut dir_under_100000_sum = 0;
-    file_tree.sort_by(|a, b| get_file_depth(a.clone()).cmp(&get_file_depth(b.clone())));
-    for file in &file_tree {
-        if file.is_dir() {
-            let dir_size = directory_size(file.clone(), &file_tree);
-            if dir_size <= 100000 {
-                dir_under_100000_sum += dir_size
-            }
-            println!(
-                "{} f {} - {}",
-                "-".repeat(get_file_depth(file.clone())),
-                file.name,
-                dir_size
-            );
-        } else {
-            println!(
-                "{} d {} - {}",
-                "-".repeat(get_file_depth(file.clone())),
-                file.name,
-                file.size
-            );
+    for file in file_tree.iter().filter(|f| f.is_dir()) {
+        if let Some(content) = file.get_content(&file_tree) {
+            print_content(file, &content);
         }
     }
-    println!("{}", dir_under_100000_sum);
+    let sum = file_tree
+        .iter()
+        .filter(|f| f.total_size.get() <= 100000 && f.total_size.get() > 0)
+        .map(|f| f.total_size.get())
+        .sum::<u64>();
+
+    println!("sum {}", sum);
 }
 
-fn directory_size(dir: Arc<ElfFile>, tree: &Vec<Arc<ElfFile>>) -> i32 {
-    let mut sum = 0;
-    for file in tree {
-        if !file.is_root() {
-            if dir.name == file.parent.clone().unwrap().name {
-                if !file.is_dir() {
-                    sum += file.size;
-                }
-            }
+fn print_content(file: &Arc<ElfFile>, content: &Vec<Arc<ElfFile>>) {
+    println!(
+        "{}[{}] ({})",
+        "  ".repeat(get_file_depth(file.clone())),
+        file.name,
+        file.total_size.get()
+    );
+    for content_file in content.iter().filter(|f| !f.is_dir()) {
+        if let Some(sub) = content_file.get_content(content) {
+            print_content(content_file, &sub);
         }
+        println!(
+            "{}-{} ({})",
+            "  ".repeat(get_file_depth(file.clone())) + " |",
+            content_file.name,
+            content_file.size
+        );
     }
-    sum
 }
 
 fn get_file_depth(file: Arc<ElfFile>) -> usize {
@@ -126,6 +161,7 @@ fn execute_cd<'a>(command: &'a str, current_dir: Arc<ElfFile>) -> Option<ElfFile
             name: dir_name.to_string(),
             size: -1,
             parent: Some(current_dir),
+            total_size: Cell::new(0),
         };
         return Some(new_file);
     } else {
