@@ -16,21 +16,21 @@ impl ElfFile {
     fn is_dir(&self) -> bool {
         self.size < 0
     }
-}
 
-fn mkdir(name: &str) -> ElfFile {
-    ElfFile {
-        name: name.to_string(),
-        size: -1,
-        parent: None,
+    fn is_root(&self) -> bool {
+        self.name == "/"
     }
 }
 
 fn main() {
     let history = get_lines("input");
 
-    let tree_root = mkdir("/");
-    let mut file_tree: Vec<Arc<ElfFile>> = vec![Arc::new(tree_root)];
+    let tree_root = Arc::new(ElfFile {
+        name: "/".to_string(),
+        size: -1,
+        parent: None,
+    });
+    let mut file_tree: Vec<Arc<ElfFile>> = vec![tree_root.clone()];
 
     let mut current_directory = file_tree[0].clone();
 
@@ -59,26 +59,59 @@ fn main() {
             HistoryItemType::LS => (),
         }
     }
-    let mut dir_sizes = HashMap::new();
-    for file in &file_tree[1..] {
-        if !file.is_dir() {
-            let parent = file.parent.clone().unwrap();
-            let name = parent.name.clone();
-            if dir_sizes.contains_key(&name) {
-                let key = name.clone();
-                dir_sizes.entry(key).and_modify(|size| *size += file.size);
-            } else {
-                dir_sizes.insert(name, file.size);
+
+    let mut dir_under_100000_sum = 0;
+    file_tree.sort_by(|a, b| get_file_depth(a.clone()).cmp(&get_file_depth(b.clone())));
+    for file in &file_tree {
+        if file.is_dir() {
+            let dir_size = directory_size(file.clone(), &file_tree);
+            if dir_size <= 100000 {
+                dir_under_100000_sum += dir_size
+            }
+            println!(
+                "{} f {} - {}",
+                "-".repeat(get_file_depth(file.clone())),
+                file.name,
+                dir_size
+            );
+        } else {
+            println!(
+                "{} d {} - {}",
+                "-".repeat(get_file_depth(file.clone())),
+                file.name,
+                file.size
+            );
+        }
+    }
+    println!("{}", dir_under_100000_sum);
+}
+
+fn directory_size(dir: Arc<ElfFile>, tree: &Vec<Arc<ElfFile>>) -> i32 {
+    let mut sum = 0;
+    for file in tree {
+        if !file.is_root() {
+            if dir.name == file.parent.clone().unwrap().name {
+                if !file.is_dir() {
+                    sum += file.size;
+                }
             }
         }
     }
-
-    for (k, v) in dir_sizes.iter().filter(|dir| dir.1 <= &&100000) {
-        println!("{}: {}", k, v);
-    }
+    sum
 }
 
-fn directory_size(dir: Arc<ElfFile>, tree: &Vec<Arc<ElfFile>>) {}
+fn get_file_depth(file: Arc<ElfFile>) -> usize {
+    if file.is_root() {
+        return 0;
+    }
+    let mut depth: usize = 1;
+    let mut search = file.clone();
+    while search.parent.clone().unwrap().name != "/" {
+        depth += 1;
+        search = search.parent.clone().unwrap();
+    }
+    depth
+}
 
 enum HistoryItemType {
     CD,
