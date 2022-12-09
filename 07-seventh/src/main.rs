@@ -11,6 +11,7 @@ struct ElfFile {
     size: i64,
     parent: Option<Arc<ElfFile>>,
     total_size: Cell<u64>,
+    depth: usize,
 }
 
 impl ElfFile {
@@ -49,6 +50,7 @@ fn main() {
         size: -1,
         parent: None,
         total_size: Cell::new(0),
+        depth: 0,
     });
     let mut file_tree: Vec<Arc<ElfFile>> = vec![tree_root.clone()];
 
@@ -84,6 +86,7 @@ fn main() {
                         name: split_item.next().unwrap().to_string(),
                         parent: Some(current_directory.clone()),
                         total_size: Cell::new(0),
+                        depth: current_directory.depth + 1,
                     };
 
                     let file_arc = Arc::new(new_file);
@@ -117,35 +120,28 @@ fn main() {
 
 fn print_content(file: &Arc<ElfFile>, content: &Vec<Arc<ElfFile>>) {
     println!(
-        "{}[{}] ({})",
-        "  ".repeat(get_file_depth(file.clone())),
+        "{} ┍{} ({})",
+        " ".repeat(file.depth) + "",
         file.name,
-        file.total_size.get()
+        file.total_size.get(),
     );
-    for content_file in content.iter().filter(|f| !f.is_dir()) {
+    let mut subfolders = content.iter().filter(|f| !f.is_dir()).peekable();
+
+    while let Some(content_file) = subfolders.next() {
         if let Some(sub) = content_file.get_content(content) {
             print_content(content_file, &sub);
         }
         println!(
-            "{}-{} ({})",
-            "  ".repeat(get_file_depth(file.clone())) + " |",
+            "{}┄┄{} ({})",
+            if subfolders.peek().is_none() {
+                " ".repeat(file.depth) + " └"
+            } else {
+                " ".repeat(file.depth) + " ├"
+            },
             content_file.name,
             content_file.size
         );
     }
-}
-
-fn get_file_depth(file: Arc<ElfFile>) -> usize {
-    if file.is_root() {
-        return 0;
-    }
-    let mut depth: usize = 1;
-    let mut search = file.clone();
-    while search.parent.clone().unwrap().name != "/" {
-        depth += 1;
-        search = search.parent.clone().unwrap();
-    }
-    depth
 }
 
 enum HistoryItemType {
@@ -160,8 +156,9 @@ fn execute_cd<'a>(command: &'a str, current_dir: Arc<ElfFile>) -> Option<ElfFile
         let new_file = ElfFile {
             name: dir_name.to_string(),
             size: -1,
-            parent: Some(current_dir),
+            parent: Some(current_dir.clone()),
             total_size: Cell::new(0),
+            depth: current_dir.clone().depth + 1,
         };
         return Some(new_file);
     } else {
