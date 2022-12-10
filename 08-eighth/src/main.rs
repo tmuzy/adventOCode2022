@@ -1,3 +1,4 @@
+use colored::*;
 use std::{
   fmt::Display,
   fs::File,
@@ -58,23 +59,6 @@ fn get_opposite_direction(direction: &Direction) -> Direction {
   }
 }
 
-struct Directions {
-  left: bool,
-  right: bool,
-  top: bool,
-  bottom: bool,
-}
-
-impl Display for Directions {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(
-      f,
-      "←: {}, ↑:{}, →{}, ↓:{}",
-      self.left, self.top, self.right, self.bottom
-    )
-  }
-}
-
 impl Display for Tree {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     write!(f, "x:{}, y:{}, h:{}", self.pos.x, self.pos.y, self.height)
@@ -86,18 +70,13 @@ type TreeGrid = Vec<Tree>;
 trait TreeGridOperations {
   fn get_width(&self) -> usize;
   fn get_tree(&self, tree_pos: &Pos) -> Option<&Tree>;
-  fn has_left_neighbour(&self, tree_pos: &Pos) -> bool;
-  fn has_right_neighbour(&self, tree_pos: &Pos) -> bool;
-  fn has_top_neighbour(&self, tree_pos: &Pos) -> bool;
-  fn has_bottom_neighbour(&self, tree_pos: &Pos) -> bool;
   fn has_neighbour(&self, tree_pos: &Pos, direction: &Direction) -> bool;
   fn get_neighbour(&self, tree_pos: &Pos, direction: &Direction) -> Option<&Tree>;
   fn get_neighbour_height(&self, tree_pos: &Pos, direction: &Direction) -> Option<usize>;
-  fn get_height(&self, tree_pos: &Pos) -> Option<usize>;
-
-  fn is_tree_visible_from(&self, tree_pos: &Pos, direction: &Direction) -> bool;
   fn is_tree_on_edge(&self, tree_pos: &Pos, direction: &Direction) -> bool;
-  fn is_tree_in_corner(&self, tree_pos: &Pos) -> bool;
+  fn calculate_scenic_score(&self, tree_pos: &Pos, direction: &Direction) -> usize;
+  fn total_scenic_score(&self, tree_pos: &Pos) -> usize;
+  fn get_visible_trees(&self);
 }
 
 impl TreeGridOperations for TreeGrid {
@@ -107,31 +86,13 @@ impl TreeGridOperations for TreeGrid {
   fn get_tree(&self, tree_pos: &Pos) -> Option<&Tree> {
     self.iter().find(|t| tree_pos == &t.pos)
   }
-  fn get_height(&self, tree_pos: &Pos) -> Option<usize> {
-    if let Some(tree) = self.get_tree(tree_pos) {
-      return Some(tree.height);
-    }
-    None
-  }
-  fn has_left_neighbour(&self, tree_pos: &Pos) -> bool {
-    tree_pos.x > MIN_POS
-  }
-  fn has_right_neighbour(&self, tree_pos: &Pos) -> bool {
-    tree_pos.x < self.get_width()
-  }
-  fn has_top_neighbour(&self, tree_pos: &Pos) -> bool {
-    tree_pos.y > MIN_POS
-  }
-  fn has_bottom_neighbour(&self, tree_pos: &Pos) -> bool {
-    tree_pos.y < self.get_width()
-  }
 
   fn has_neighbour(&self, tree_pos: &Pos, direction: &Direction) -> bool {
     match direction {
-      Direction::Left => self.has_left_neighbour(tree_pos),
-      Direction::Top => self.has_top_neighbour(tree_pos),
-      Direction::Right => self.has_right_neighbour(tree_pos),
-      Direction::Bottom => self.has_bottom_neighbour(tree_pos),
+      Direction::Left => tree_pos.x > MIN_POS,
+      Direction::Top => tree_pos.y > MIN_POS,
+      Direction::Right => tree_pos.x < self.get_width(),
+      Direction::Bottom => tree_pos.y < self.get_width(),
     }
   }
 
@@ -152,28 +113,117 @@ impl TreeGridOperations for TreeGrid {
     None
   }
 
-  fn is_tree_visible_from(&self, tree_pos: &Pos, direction: &Direction) -> bool {
-    self.get_height(tree_pos) > self.get_neighbour_height(tree_pos, direction)
-  }
-
   fn is_tree_on_edge(&self, tree_pos: &Pos, direction: &Direction) -> bool {
     match direction {
-      Direction::Left => !self.has_left_neighbour(tree_pos),
-      Direction::Top => !self.has_top_neighbour(tree_pos),
-      Direction::Right => !self.has_right_neighbour(tree_pos),
-      Direction::Bottom => !self.has_bottom_neighbour(tree_pos),
+      Direction::Left => !self.has_neighbour(tree_pos, direction),
+      Direction::Top => !self.has_neighbour(tree_pos, direction),
+      Direction::Right => !self.has_neighbour(tree_pos, direction),
+      Direction::Bottom => !self.has_neighbour(tree_pos, direction),
     }
   }
 
-  fn is_tree_in_corner(&self, tree_pos: &Pos) -> bool {
-    (self.is_tree_on_edge(tree_pos, &Direction::Left)
-      && self.is_tree_on_edge(tree_pos, &Direction::Top))
-      || (self.is_tree_on_edge(tree_pos, &Direction::Right)
-        && self.is_tree_on_edge(tree_pos, &Direction::Top))
-      || (self.is_tree_on_edge(tree_pos, &Direction::Bottom)
-        && self.is_tree_on_edge(tree_pos, &Direction::Left))
-      || (self.is_tree_on_edge(tree_pos, &Direction::Bottom)
-        && self.is_tree_on_edge(tree_pos, &Direction::Right))
+  fn get_visible_trees(&self) {
+    const ALL_DIRECTIONS: [Direction; 4] = [
+      Direction::Left,
+      Direction::Top,
+      Direction::Right,
+      Direction::Bottom,
+    ];
+
+    let mut visible_trees: Vec<&Tree> = Vec::new();
+    for direction in ALL_DIRECTIONS {
+      for tree in self
+        .iter()
+        .filter(|t| self.is_tree_on_edge(&t.pos, &direction))
+      {
+        if visible_trees.iter().find(|t| tree.pos == t.pos).is_none() {
+          visible_trees.push(tree);
+        }
+        let mut current: &Tree = tree;
+        let mut highest: &Tree = tree;
+        loop {
+          if let Some(neigh) = self.get_neighbour(&current.pos, &get_opposite_direction(&direction))
+          {
+            if neigh.height > highest.height {
+              if visible_trees.iter().find(|t| neigh.pos == t.pos).is_none() {
+                visible_trees.push(neigh);
+              }
+            }
+            current = neigh;
+            if current.height > highest.height {
+              highest = current;
+            }
+          } else {
+            break;
+          }
+        }
+      }
+    }
+
+    for t in self {
+      if visible_trees.iter().find(|vt| vt.pos == t.pos).is_some() {
+        print!("{}", t.height);
+      } else {
+        print!("▒");
+      }
+      if t.pos.x == self.get_width() {
+        println!("")
+      }
+    }
+    println!("count {}", visible_trees.len());
+  }
+
+  fn calculate_scenic_score(&self, tree_pos: &Pos, direction: &Direction) -> usize {
+    let mut score = 0;
+    let mut current: &Tree = self.get_tree(tree_pos).unwrap();
+    let start: &Tree = self.get_tree(tree_pos).unwrap();
+    loop {
+      if let Some(neigh) = self.get_neighbour(&current.pos, &direction) {
+        score += 1;
+        if neigh.height >= start.height {
+          break;
+        }
+        current = neigh;
+      } else {
+        break;
+      }
+    }
+
+    score
+  }
+
+  fn total_scenic_score(&self, tree_pos: &Pos) -> usize {
+    if self.is_tree_on_edge(tree_pos, &Direction::Bottom)
+      || self.is_tree_on_edge(tree_pos, &Direction::Left)
+      || self.is_tree_on_edge(tree_pos, &Direction::Right)
+      || self.is_tree_on_edge(tree_pos, &Direction::Top)
+    {
+      return 0;
+    }
+
+    let total = self.calculate_scenic_score(tree_pos, &Direction::Bottom)
+      * self.calculate_scenic_score(tree_pos, &Direction::Left)
+      * self.calculate_scenic_score(tree_pos, &Direction::Right)
+      * self.calculate_scenic_score(tree_pos, &Direction::Top);
+    total
+  }
+}
+
+const PART_ONE: bool = false;
+
+fn get_height_color(height: &usize, score: &usize) -> ColoredString {
+  match score {
+    0 => (" ".to_owned() + &height.to_string()).on_blue(),
+    1 => (" ".to_owned() + &height.to_string()).on_bright_blue(),
+    2 => (" ".to_owned() + &height.to_string()).on_cyan(),
+    3 => (" ".to_owned() + &height.to_string()).on_bright_cyan(),
+    4..=10 => (" ".to_owned() + &height.to_string()).on_green(),
+    11..=50_000 => (" ".to_owned() + &height.to_string()).on_bright_green(),
+    50_001..=100_000 => (" ".to_owned() + &height.to_string()).on_yellow(),
+    100_001..=200_000 => (" ".to_owned() + &height.to_string()).on_bright_yellow(),
+    200_001..=300_000 => (" ".to_owned() + &height.to_string()).on_bright_red(),
+    300_001.. => (" ".to_owned() + &height.to_string()).on_red(),
+    &_ => (" ".to_owned() + &height.to_string()).white(),
   }
 }
 
@@ -194,54 +244,24 @@ fn main() {
     }
   }
 
-  const ALL_DIRECTIONS: [Direction; 4] = [
-    Direction::Left,
-    Direction::Top,
-    Direction::Right,
-    Direction::Bottom,
-  ];
-
-  let mut visible_trees: Vec<&Tree> = Vec::new();
-  for direction in ALL_DIRECTIONS {
-    for tree in trees
-      .iter()
-      .filter(|t| trees.is_tree_on_edge(&t.pos, &direction))
-    {
-      if visible_trees.iter().find(|t| tree.pos == t.pos).is_none() {
-        visible_trees.push(tree);
-      }
-      let mut current: &Tree = tree;
-      let mut highest: &Tree = tree;
-      loop {
-        if let Some(neigh) = trees.get_neighbour(&current.pos, &get_opposite_direction(&direction))
-        {
-          if neigh.height > highest.height {
-            if visible_trees.iter().find(|t| neigh.pos == t.pos).is_none() {
-              visible_trees.push(neigh);
-            }
-          }
-          current = neigh;
-          if current.height > highest.height {
-            highest = current;
-          }
-        } else {
-          break;
-        }
-      }
-    }
+  if PART_ONE {
+    trees.get_visible_trees();
   }
 
-  for t in &trees {
-    if visible_trees.iter().find(|vt| vt.pos == t.pos).is_some() {
-      print!("{}", t.height);
-    } else {
-      print!("▒");
-    }
-    if t.pos.x == trees.get_width() {
+  let scores: Vec<(&Tree, usize)> = trees
+    .iter()
+    .map(|t| (t, trees.total_scenic_score(&t.pos)))
+    .collect();
+  let best = scores.iter().max_by_key(|t| t.1).unwrap().1;
+  for t in scores {
+    print!("{}", get_height_color(&t.0.height, &t.1));
+
+    if t.0.pos.x == trees.get_width() {
       println!("")
     }
   }
-  println!("count {}", visible_trees.len())
+  println!("\r");
+  println!("best scenic score {}", best);
 }
 
 fn get_lines(filename: &str) -> Vec<String> {
